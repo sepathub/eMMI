@@ -93,7 +93,6 @@
                     console.error('Error fetching records:', error);
                 } else {
                     // MAPPING DATA: Tukar keys huruf kecil (dari DB) ke camelCase (untuk App)
-                    // Postgres secara automatik menukar nama column ke huruf kecil
                     const formattedData = (data || []).map(item => ({
                         id: item.id,
                         teacherName: item.teachername || item.teacherName, // Terima teachername atau teacherName
@@ -107,54 +106,76 @@
                 }
             };
 
-            // Data Senarai Kelas
+            // Data Senarai Kelas (DIKEMASKINI)
             const KELAS_LIST = [
+                "PRA Cemerlang", "Pra Gemilang", // Pra Sekolah ditambah di awal
                 "1 Ikhlas", "1 Setia",
                 "2 Maju", "2 Perkasa",
                 "3 Naim", "3 Aktif",
                 "4 Gigih", "4 Ehsan",
                 "5 Mahir", "5 Pintar",
                 "6 Arif", "6 Tekun",
-                "Firdaus", "Mawa",
-                "Rayyan", "Adn"
+                "PPKI Adn", "PPKI Mawa", "PPKI Firdaus", "PPKI Rayyan" // PPKI ditambah di akhir
             ];
 
-            // Data Senarai Subjek
+            // Data Senarai Subjek (DIKEMASKINI)
             const SUBJEK_LIST = [
                 "Bahasa Melayu (BM)", "Bahasa Inggeris (BI)", "Matematik (MT)", "Sains (SN)",
-                "Bahasa Arab (BA)", "Pendidikan Islam (PAI)", "Pendidikan Jasmani & Kesihatan (PJK)", "Pendidikan Moral", 
+                "Bahasa Arab (BA)", "Pendidikan Islam (PAI)", "Pendidikan Moral", 
+                "Pendidikan Jasmani & Kesihatan (PJK)", // Ditambah
                 "Pendidikan Seni Visual (PSV)", "Pendidikan Muzik", "Sejarah (SEJ)",
-                "Reka Bentuk & Teknologi (RBT)", "TASMIK", "Kelas Ganti"
+                "Reka Bentuk & Teknologi (RBT)", "TASMIK", "Kelas Ganti",
+                "Lain-lain" // Ditambah
             ];
 
             // Data Senarai Masa
             const MASA_LIST = Array.from({ length: 12 }, (_, i) => i + 1);
 
-            // Menjana Senarai Minggu Persekolahan 2026
+            // --- LOGIK MINGGUAN DIKEMASKINI ---
             const generateWeeks2026 = () => {
                 const weeks = [];
+                // Anggaran sesi bermula Isnin, 5 Jan 2026
                 let currentDate = new Date(2026, 0, 5); 
                 
-                for (let i = 1; i <= 43; i++) {
-                const startDate = new Date(currentDate);
-                const endDate = new Date(currentDate);
-                endDate.setDate(currentDate.getDate() + 4); 
+                // Ubah limit loop kepada 52 untuk cover sepanjang tahun
+                for (let i = 1; i <= 52; i++) {
+                    const startDate = new Date(currentDate);
+                    // Tetapkan masa ke 00:00:00
+                    startDate.setHours(0,0,0,0);
+                    
+                    const endDate = new Date(currentDate);
+                    // Tambah 4 hari untuk dapatkan Jumaat (untuk paparan)
+                    endDate.setDate(currentDate.getDate() + 4); 
+                    endDate.setHours(23,59,59,999);
 
-                const format = (d) => `${d.getDate()}/${d.getMonth() + 1}`;
-                
-                weeks.push({
-                    id: i,
-                    label: `Minggu ${i}`,
-                    range: `${format(startDate)} - ${format(endDate)}`
-                });
-                
-                currentDate.setDate(currentDate.getDate() + 7);
+                    const format = (d) => `${d.getDate()}/${d.getMonth() + 1}`;
+                    
+                    weeks.push({
+                        id: i,
+                        // Label hanya julat tarikh sahaja
+                        range: `${format(startDate)} - ${format(endDate)}`,
+                        startObj: startDate,
+                        endObj: endDate
+                    });
+                    
+                    // Gerak ke minggu depan (Isnin seterusnya)
+                    currentDate.setDate(currentDate.getDate() + 7);
                 }
                 return weeks;
             };
 
             const WEEKS_LIST = generateWeeks2026();
-            const [selectedWeek, setSelectedWeek] = useState(WEEKS_LIST[0].id);
+
+            // Cari minggu semasa berdasarkan tarikh hari ini
+            const getCurrentWeekId = () => {
+                const today = new Date();
+                const foundWeek = WEEKS_LIST.find(week => 
+                    today >= week.startObj && today <= new Date(week.endObj.getTime() + 2 * 86400000) // +2 hari untuk cover Sabtu/Ahad
+                );
+                return foundWeek ? foundWeek.id : WEEKS_LIST[0].id;
+            };
+
+            const [selectedWeek, setSelectedWeek] = useState(getCurrentWeekId());
 
             // State Borang
             const [formData, setFormData] = useState({
@@ -190,7 +211,7 @@
                 }
             };
 
-            // --- 5. KEMASKINI FUNGSI HANTAR (PEMBAIKAN UTAMA) ---
+            // --- 5. KEMASKINI FUNGSI HANTAR ---
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 
@@ -199,8 +220,6 @@
                 return;
                 }
 
-                // Sediakan data untuk dihantar
-                // PENTING: Gunakan key HURUF KECIL untuk column database (teachername, classname)
                 const newRecordPayload = {
                     teachername: formData.teacherName,
                     classname: formData.selectedClass,
@@ -210,58 +229,78 @@
                     date: new Date().toLocaleDateString('ms-MY')
                 };
 
-                // Hantar ke Supabase
                 const { error } = await supabase
                     .from('rekod_mmi')
                     .insert([newRecordPayload]);
 
                 if (error) {
                     console.error('Error inserting:', error);
-                    // Tunjuk mesej error yang lebih spesifik di console
                     showNotification("Gagal menyimpan. Sila semak console.", "error");
                 } else {
-                    // Berjaya simpan
-                    fetchRecords(); // Tarik data terkini
+                    fetchRecords(); 
                     setFormData({ teacherName: '', selectedClass: '', selectedSubject: '', selectedPeriod: '' });
                     showNotification("Rekod berjaya disimpan online!", "success");
                 }
             };
 
-            // Fungsi notifikasi
             const showNotification = (message, type) => {
                 setNotification({ message, type });
                 setTimeout(() => setNotification(null), 3000);
             };
 
-            // Fungsi Analisis Data untuk Laporan Mingguan
+            // --- FUNGSI ANALISIS MINGGUAN (DIKEMASKINI: FILTER BY WEEK) ---
             const getClassStats = () => {
                 const stats = {};
+                
+                // 1. Dapatkan objek minggu yang dipilih
+                const currentWeekData = WEEKS_LIST.find(w => w.id === selectedWeek);
+                if (!currentWeekData) return [];
+
+                // 2. Tapis rekod berdasarkan tarikh minggu tersebut
                 records.forEach(record => {
-                if (!stats[record.className]) {
-                    stats[record.className] = {
-                    name: record.className,
-                    totalEntries: 0
-                    };
-                }
-                stats[record.className].totalEntries += 1;
+                    if (!record.date) return;
+                    
+                    // Parse tarikh rekod dd/mm/yyyy kepada objek Date
+                    const [day, month, year] = record.date.split('/').map(Number);
+                    // Bulan dalam JS bermula 0 (Januari=0)
+                    const recordDate = new Date(year, month - 1, day); 
+                    
+                    const weekStart = currentWeekData.startObj;
+                    const weekEnd = new Date(currentWeekData.endObj);
+                    weekEnd.setDate(weekEnd.getDate() + 2); // Extend to Sunday night
+                    weekEnd.setHours(23,59,59,999);
+
+                    if (recordDate >= weekStart && recordDate <= weekEnd) {
+                        if (!stats[record.className]) {
+                            stats[record.className] = {
+                                name: record.className,
+                                totalEntries: 0
+                            };
+                        }
+                        stats[record.className].totalEntries += 1;
+                    }
                 });
+
                 return Object.values(stats).sort((a, b) => a.name.localeCompare(b.name));
             };
 
-            // Filter records berdasarkan carian
+            // Filter records berdasarkan HARI INI dan carian
             const getFilteredRecords = () => {
-                if (!searchTerm) return records;
+                const today = new Date().toLocaleDateString('ms-MY');
+                let filtered = records.filter(record => record.date === today);
+
+                if (!searchTerm) return filtered;
+
                 const lowerTerm = searchTerm.toLowerCase();
-                return records.filter(record => 
-                (record.teacherName || '').toLowerCase().includes(lowerTerm) ||
-                (record.className || '').toLowerCase().includes(lowerTerm) ||
-                (record.subject || '').toLowerCase().includes(lowerTerm)
+                return filtered.filter(record => 
+                    (record.teacherName || '').toLowerCase().includes(lowerTerm) ||
+                    (record.className || '').toLowerCase().includes(lowerTerm) ||
+                    (record.subject || '').toLowerCase().includes(lowerTerm)
                 );
             };
 
             const displayedRecords = getFilteredRecords();
 
-            // Komponen Notifikasi
             const NotificationBanner = () => {
                 return (
                 <AnimatePresence>
@@ -281,7 +320,6 @@
                 );
             };
 
-            // Variasi Animasi
             const tabVariants = {
                 hidden: { opacity: 0, x: -10 },
                 visible: { opacity: 1, x: 0, transition: { duration: 0.3, ease: "easeOut" } },
@@ -305,9 +343,7 @@
                 <div className="min-h-screen bg-slate-100 font-sans pb-24 selection:bg-indigo-200">
                 <NotificationBanner />
 
-                {/* Header Sekolah Berwarna-warni */}
                 <header className="bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 text-white p-8 rounded-b-[3rem] shadow-xl mb-8 relative overflow-hidden">
-                    {/* Dekorasi Latar Belakang */}
                     <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
                         <motion.div 
                         animate={{ rotate: 360 }}
@@ -346,10 +382,8 @@
                     </motion.div>
                 </header>
 
-                {/* Konten Utama */}
                 <main className="px-4 max-w-lg mx-auto">
                     
-                    {/* Tab Navigasi - Terapung & Berwarna */}
                     <div className="flex justify-between bg-white p-1.5 rounded-2xl shadow-lg shadow-indigo-100 mb-8 mx-2">
                     {[
                         { id: 'entry', icon: User, label: 'Masuk', color: 'bg-indigo-500' },
@@ -382,7 +416,6 @@
 
                     <AnimatePresence mode="wait">
                     {activeTab === 'entry' && (
-                    /* --- HALAMAN INPUT YANG CERIA --- */
                     <motion.div 
                         key="entry"
                         variants={tabVariants}
@@ -391,8 +424,6 @@
                         exit="exit"
                         className="space-y-5"
                     >
-                        
-                        {/* Input Nama Guru */}
                         <motion.div 
                         variants={itemVariants}
                         initial="hidden"
@@ -420,7 +451,6 @@
                         </div>
                         </motion.div>
 
-                        {/* Pilihan Kelas */}
                         <motion.div 
                         variants={itemVariants}
                         initial="hidden"
@@ -459,7 +489,6 @@
                         transition={{ delay: 0.3 }}
                         className="grid grid-cols-5 gap-4"
                         >
-                            {/* Pilihan Masa */}
                             <div className="col-span-2 bg-white p-1 rounded-2xl shadow-sm border-b-4 border-amber-100 focus-within:border-amber-400 transition-colors">
                                 <div className="p-4 flex flex-col items-center">
                                     <label className="text-[10px] font-bold text-amber-400 uppercase tracking-wide mb-1 block text-center">
@@ -484,7 +513,6 @@
                                 </div>
                             </div>
 
-                            {/* Pilihan Subjek */}
                             <div className="col-span-3 bg-white p-1 rounded-2xl shadow-sm border-b-4 border-rose-100 focus-within:border-rose-400 transition-colors">
                                 <div className="p-4">
                                     <label className="text-[10px] font-bold text-rose-400 uppercase tracking-wide mb-2 block">
@@ -508,7 +536,6 @@
                             </div>
                         </motion.div>
 
-                        {/* Butang Hantar */}
                         <motion.button 
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -528,7 +555,6 @@
                     )}
 
                     {activeTab === 'report' && (
-                    /* --- HALAMAN LAPORAN HARIAN --- */
                     <motion.div 
                         key="report"
                         variants={tabVariants}
@@ -540,7 +566,9 @@
                         <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100 flex justify-between items-center">
                             <div>
                                 <h3 className="text-lg font-bold text-rose-800">Laporan Harian</h3>
-                                <p className="text-xs text-rose-500">Pantau kemasukan guru ke kelas</p>
+                                <p className="text-xs text-rose-500">
+                                    Tarikh: {new Date().toLocaleDateString('ms-MY', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                </p>
                             </div>
                             <motion.span 
                             key={displayedRecords.length}
@@ -552,7 +580,6 @@
                             </motion.span>
                         </div>
 
-                        {/* Bar Carian */}
                         <div className="relative">
                         <input 
                             type="text" 
@@ -584,11 +611,10 @@
                                 <ClipboardList size={40} />
                             </div>
                             <p className="text-slate-400 font-medium">
-                            {searchTerm ? "Tiada rekod ditemui untuk carian ini." : "Belum ada guru masuk kelas lagi hari ini."}
+                            {searchTerm ? "Tiada rekod ditemui untuk carian ini." : "Belum ada guru masuk kelas hari ini."}
                             </p>
                         </motion.div>
                         ) : (
-                        // Paparan Mengikut Kelas
                         <motion.div 
                             variants={containerVariants}
                             initial="hidden"
@@ -694,14 +720,14 @@
                                 >
                                     {WEEKS_LIST.map((week) => (
                                         <option key={week.id} value={week.id}>
-                                            {week.label}: {week.range}
+                                            {week.range} {/* PAPAR JULAT TARIKH SAHAJA */}
                                         </option>
                                     ))}
                                 </select>
                             </div>
                         </div>
 
-                        {records.length === 0 ? (
+                        {getClassStats().length === 0 ? (
                         <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-slate-200 opacity-70">
                             <p className="text-slate-400 font-medium">Tiada data untuk dianalisis bagi minggu ini.</p>
                         </div>
@@ -737,7 +763,6 @@
 
                 </main>
                 
-                {/* Footer yang lebih ceria */}
                 <footer className="text-center p-8 text-indigo-300 text-[10px] font-medium tracking-wide">
                     <p>© 2026 SKSE</p>
                     <p className="opacity-50 mt-1">SePaT ❤️</p>
@@ -751,4 +776,3 @@
     </script>
 </body>
 </html>
-
